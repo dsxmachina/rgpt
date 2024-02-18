@@ -25,7 +25,7 @@ use std::{env::VarError, io::Write};
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
 use reqwest::Client;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -37,7 +37,7 @@ pub enum Error {
     #[error(transparent)]
     Req(#[from] reqwest::Error),
     #[error("channel closed")]
-    Send(#[from] mpsc::error::SendError<String>),
+    Send(#[from] mpsc::error::SendError<Output>),
     #[error("Missing OPENAI_KEY environment variable")]
     ApiKey(#[from] VarError),
 }
@@ -116,6 +116,12 @@ fn test_chunk() {
     assert!(parsed.is_ok(), "Error: {}", parsed.unwrap_err());
 }
 
+#[derive(Debug)]
+pub enum Output {
+    Data(String),
+    End,
+}
+
 impl GptClient {
     pub fn new() -> Self {
         GptClient {
@@ -174,7 +180,7 @@ impl GptClient {
     pub async fn event_stream(
         mut self,
         mut input_rx: mpsc::Receiver<String>,
-        output_tx: mpsc::Sender<String>,
+        output_tx: mpsc::Sender<Output>,
     ) -> Result<()> {
         while let Some(input) = input_rx.recv().await {
             self.messages.push(Msg {
@@ -201,7 +207,6 @@ impl GptClient {
                 .bytes_stream()
                 .eventsource();
 
-            println!("Entering event-stream");
             while let Some(item) = response_stream.next().await {
                 let event = item.unwrap();
                 let parsed: Chunk = match serde_json::from_str(&event.data) {
@@ -214,9 +219,11 @@ impl GptClient {
                     }
                 };
                 for word in parsed.choices.into_iter().flat_map(|c| c.delta.content) {
-                    output_tx.send(word).await?;
+                    output_tx.send(Output::Data(word)).await?;
                 }
             }
+            // Let the outside world know, that chatgpt is done now
+            output_tx.send(Output::End).await?;
         }
         Ok(())
     }

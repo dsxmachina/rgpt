@@ -13,9 +13,10 @@ mod client;
 
 use std::{
     error::Error,
-    io::{stdin, stdout, Write},
+    io::{stdin, Write},
 };
 
+use client::Output;
 use tokio::{spawn, sync::mpsc};
 
 use crate::client::GptClient;
@@ -33,9 +34,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
 
     // Ok, focus on the gpt-part for a short time
-
-    let mut client = GptClient::new();
-
     let mut input = String::new();
 
     if args.len() > 1 {
@@ -55,12 +53,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (input_tx, input_rx) = mpsc::channel(16);
     let (output_tx, mut output_rx) = mpsc::channel(16);
 
+    // Create a new client and spawn an event stream
+    let client = GptClient::new();
     let handle = spawn(client.event_stream(input_rx, output_tx));
     input_tx.send(input).await?;
 
-    while let Some(answer) = output_rx.recv().await {
-        print!("{}", answer);
-        std::io::stdout().flush()?;
+    while let Some(output) = output_rx.recv().await {
+        match output {
+            Output::Data(answer) => {
+                print!("{}", answer);
+                std::io::stdout().flush()?;
+            }
+            Output::End => {
+                // We could now handle another input
+                println!("");
+            }
+        }
     }
 
     handle.await??;
