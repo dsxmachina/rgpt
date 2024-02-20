@@ -1,7 +1,7 @@
 mod client;
 // Alright boy - step 1,
 //
-// build something you can type a promt into
+// build something you can type a prompt into
 //
 // step 2
 //
@@ -11,16 +11,22 @@ mod client;
 //
 // success
 
+use crate::client::GptClient;
+use client::Output;
+use pulldown_cmark_mdcat::resources::NoopResourceHandler;
+use pulldown_cmark_mdcat::{Environment, Settings, TerminalSize};
+use std::env;
+use std::io::stdout;
+use std::path::Path;
 use std::{
     error::Error,
     io::{stdin, Write},
 };
-
-use client::Output;
 use tokio::{spawn, sync::mpsc};
 
-use crate::client::GptClient;
-use std::env;
+use pulldown_cmark::{Event as MdEvent, Options, Parser};
+use pulldown_cmark_mdcat::{push_tty, terminal::TerminalProgram};
+use syntect::parsing::SyntaxSet;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -58,18 +64,48 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let handle = spawn(client.event_stream(input_rx, output_tx));
     input_tx.send(input).await?;
 
+    // In the meantime, initialize the terminal output
+    let tp = TerminalProgram::detect();
+    let ss = SyntaxSet::load_defaults_newlines();
+    let mut terminal_size = TerminalSize::detect().unwrap();
+    terminal_size.columns = terminal_size.columns / 2;
+    let settings = Settings {
+        terminal_capabilities: tp.capabilities(),
+        terminal_size,
+        syntax_set: &ss,
+        theme: pulldown_cmark_mdcat::Theme::default(),
+    };
+    // Why the fuck do we need this ?
+    let current_path = Path::new(".").canonicalize()?;
+    let environment = Environment::for_local_directory(&current_path)?;
+    let rs_handler = NoopResourceHandler;
+
+    // NOTE: We could use MAX_TOKENS to initialize the answer string correctly,
+    // however 10k should be enough for most questions.
+    let mut full_answer = String::with_capacity(10_000);
+
+    // And await events from gpt-client
     while let Some(output) = output_rx.recv().await {
         match output {
             Output::Data(answer) => {
-                print!("{}", answer);
-                std::io::stdout().flush()?;
+                full_answer.push_str(&answer);
+                // let mut buffer = Vec::with_capacity(32);
+                // push_tty(&settings, &environment, &rs_handler, &mut buffer, parser)?;
             }
             Output::End => {
-                // We could now handle another input
                 println!("");
+                //println!("formatted:");
+                // We could now handle another input
+                let parser = Parser::new_ext(&full_answer, Options::all());
+                push_tty(&settings, &environment, &rs_handler, &mut stdout(), parser)?;
+                full_answer.clear();
+                //println!("{full_answer}");
+                break;
             }
         }
     }
+    drop(input_tx);
+    drop(output_rx);
 
     handle.await??;
     Ok(())
