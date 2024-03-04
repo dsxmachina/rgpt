@@ -50,11 +50,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         input.pop();
     } else {
         let std_input = stdin();
-        println!("");
         std_input.read_line(&mut input)?;
         println!("");
     };
-    // let result = client.make_request(input).await?;
 
     let (input_tx, input_rx) = mpsc::channel(16);
     let (output_tx, mut output_rx) = mpsc::channel(16);
@@ -84,26 +82,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // however 10k should be enough for most questions.
     let mut full_answer = String::with_capacity(10_000);
 
-    // And await events from gpt-client
-    while let Some(output) = output_rx.recv().await {
-        match output {
-            Output::Data(answer) => {
-                full_answer.push_str(&answer);
-                // let mut buffer = Vec::with_capacity(32);
-                // push_tty(&settings, &environment, &rs_handler, &mut buffer, parser)?;
-            }
-            Output::End => {
-                println!("");
-                //println!("formatted:");
-                // We could now handle another input
-                let parser = Parser::new_ext(&full_answer, Options::all());
-                push_tty(&settings, &environment, &rs_handler, &mut stdout(), parser)?;
-                full_answer.clear();
-                //println!("{full_answer}");
-                break;
+    loop {
+        // And await events from gpt-client
+        while let Some(output) = output_rx.recv().await {
+            match output {
+                Output::Data(answer) => {
+                    full_answer.push_str(&answer);
+                    // let mut buffer = Vec::with_capacity(32);
+                    // push_tty(&settings, &environment, &rs_handler, &mut buffer, parser)?;
+                }
+                Output::End => {
+                    println!("---");
+                    //println!("formatted:");
+                    // We could now handle another input
+                    let parser = Parser::new_ext(&full_answer, Options::all());
+                    push_tty(&settings, &environment, &rs_handler, &mut stdout(), parser)?;
+                    full_answer.clear();
+                    //println!("{full_answer}");
+                    break;
+                }
             }
         }
+        println!("\n---");
+        // Let's take another input
+        let mut input = String::new();
+        stdin().read_line(&mut input)?;
+        input_tx.send(input).await?;
     }
+    // Drop the handles here, so that the handle can return properly
     drop(input_tx);
     drop(output_rx);
 

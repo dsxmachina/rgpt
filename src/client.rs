@@ -20,7 +20,10 @@
 //         "temperature": '$TEMPERATURE'
 //         }'
 
-use std::{env::VarError, io::Write};
+use std::{
+    env::{self, VarError},
+    io::Write,
+};
 
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
@@ -136,13 +139,15 @@ impl GptClient {
             content: input,
         });
 
+        let model = env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4-0125-preview".to_string());
+
         let rq = GptReq {
-            model: "gpt-3.5-turbo-0125".to_string(),
+            model,
             messages: self.messages.clone(),
             stream: true,
         };
 
-        let openai_key = std::env::var("OPENAI_KEY")?;
+        let openai_key = env::var("OPENAI_KEY")?;
 
         let mut response_stream = self
             .client
@@ -194,7 +199,7 @@ impl GptClient {
                 stream: true,
             };
 
-            let openai_key = std::env::var("OPENAI_KEY")?;
+            let openai_key = env::var("OPENAI_KEY")?;
 
             let mut response_stream = self
                 .client
