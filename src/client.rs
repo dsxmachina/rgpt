@@ -193,8 +193,11 @@ impl GptClient {
                 content: input,
             });
 
+            let model =
+                env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4-0125-preview".to_string());
+
             let rq = GptReq {
-                model: "gpt-3.5-turbo-0125".to_string(),
+                model,
                 messages: self.messages.clone(),
                 stream: true,
             };
