@@ -6,9 +6,21 @@
     flake-utils.follows = "rust-overlay/flake-utils";
     nixpkgs.follows = "rust-overlay/nixpkgs";
   };
-
-  outputs = { self, nixpkgs }: {
-    packages.x86_64-linux.rgpt =  nixpkgs.callPackage ./. { inherit nixpkgs; };
-    packages.x86_64-linux.default = self.packages.x86_64-linux.rgpt;
-  };
+  
+  outputs = inputs: with inputs;
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = nixpkgs.legacyPackages.${system};
+        code = pkgs.callPackage ./. { inherit pkgs system rust-overlay; };
+      in rec {
+        packages = {
+          rgpt = code.rgpt;
+          all = pkgs.symlinkJoin {
+            name = "all";
+            paths = with code; [ rgpt ];
+          };
+          default = packages.all;
+        };
+      }
+    );
 }
