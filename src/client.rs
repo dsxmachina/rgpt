@@ -193,8 +193,7 @@ impl GptClient {
                 content: input,
             });
 
-            let model =
-                env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4-0125-preview".to_string());
+            let model = env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4o".to_string());
 
             let rq = GptReq {
                 model,
