@@ -20,10 +20,7 @@
 //         "temperature": '$TEMPERATURE'
 //         }'
 
-use std::{
-    env::{self, VarError},
-    io::Write,
-};
+use std::env::{self, VarError};
 
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
@@ -120,10 +117,34 @@ fn test_chunk() {
 }
 
 #[derive(Debug)]
+pub enum UseContext {
+    Basic,
+    Short,
+    Programming,
+}
+
+#[derive(Debug)]
+pub enum Input {
+    Text(String),
+    Context(UseContext),
+    Clear,
+}
+
+#[derive(Debug)]
 pub enum Output {
     Data(String),
     End,
 }
+
+const BASIC_CONTEXT: &str = "You are a helpful assistant.";
+const NO_REPEAT: &str = "You are a helpful and very direct assistant.\
+                         You don't repeat the user's input in your answer,\
+                         you just provide a short and precise answer.";
+const PROGRAMMING: &str = "You are an assistant for a programmer.\
+                           You can assume basic knowledge about how to use the commandline in linux \
+                           and an understanding of basic principles in programming languages.\
+                           In general, all your answers should assume, that the user is running a linux operating system.\
+                           However, this should not change your answer related to non-computer issues.";
 
 impl GptClient {
     pub fn new() -> Self {
@@ -133,104 +154,104 @@ impl GptClient {
         }
     }
 
-    pub async fn make_request(&mut self, input: String) -> Result<Vec<String>> {
-        self.messages.push(Msg {
-            role: "user".to_string(),
-            content: input,
-        });
-
-        let model = env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4-0125-preview".to_string());
-
-        let rq = GptReq {
-            model,
-            messages: self.messages.clone(),
-            stream: true,
-        };
-
-        let openai_key = env::var("OPENAI_KEY")?;
-
-        let mut response_stream = self
-            .client
-            .post("https://api.openai.com/v1/chat/completions")
-            .bearer_auth(openai_key)
-            .json(&rq)
-            .send()
-            .await?
-            .error_for_status()?
-            .bytes_stream()
-            .eventsource();
-
-        let mut answer = Vec::new();
-        while let Some(item) = response_stream.next().await {
-            let event = item.unwrap();
-            let parsed: Chunk = match serde_json::from_str(&event.data) {
-                Ok(value) => value,
-                Err(e) => {
-                    if event.data != "[DONE]" {
-                        eprintln!("{} could not be parsed: {e}", event.data);
-                    }
-                    continue;
-                }
-            };
-            for word in parsed.choices.into_iter().flat_map(|c| c.delta.content) {
-                print!("{}", word);
-                std::io::stdout().flush().unwrap();
-                answer.push(word);
-            }
-        }
-        println!("");
-        Ok(answer)
-    }
-
     pub async fn event_stream(
         mut self,
-        mut input_rx: mpsc::Receiver<String>,
+        mut input_rx: mpsc::Receiver<Input>,
         output_tx: mpsc::Sender<Output>,
     ) -> Result<()> {
+        // Base context
+        let mut context = Msg {
+            role: "system".to_string(),
+            content: PROGRAMMING.to_string(),
+        };
+        self.messages.push(context.clone());
         while let Some(input) = input_rx.recv().await {
-            self.messages.push(Msg {
-                role: "user".to_string(),
-                content: input,
-            });
+            match input {
+                Input::Text(input) => {
+                    self.messages.push(Msg {
+                        role: "user".to_string(),
+                        content: input,
+                    });
 
-            let model = env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4o".to_string());
+                    let model = env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4o".to_string());
 
-            let rq = GptReq {
-                model,
-                messages: self.messages.clone(),
-                stream: true,
-            };
+                    let rq = GptReq {
+                        model,
+                        messages: self.messages.clone(),
+                        stream: true,
+                    };
 
-            let openai_key = env::var("OPENAI_KEY")?;
+                    let openai_key = env::var("OPENAI_KEY")?;
 
-            let mut response_stream = self
-                .client
-                .post("https://api.openai.com/v1/chat/completions")
-                .bearer_auth(openai_key)
-                .json(&rq)
-                .send()
-                .await?
-                .error_for_status()?
-                .bytes_stream()
-                .eventsource();
+                    let mut response_stream = self
+                        .client
+                        .post("https://api.openai.com/v1/chat/completions")
+                        .bearer_auth(openai_key)
+                        .json(&rq)
+                        .send()
+                        .await?
+                        .error_for_status()?
+                        .bytes_stream()
+                        .eventsource();
 
-            while let Some(item) = response_stream.next().await {
-                let event = item.unwrap();
-                let parsed: Chunk = match serde_json::from_str(&event.data) {
-                    Ok(value) => value,
-                    Err(e) => {
-                        if event.data != "[DONE]" {
-                            eprintln!("{} could not be parsed: {e}", event.data);
+                    let mut answer = String::with_capacity(1_000);
+                    while let Some(item) = response_stream.next().await {
+                        let event = item.unwrap();
+                        let parsed: Chunk = match serde_json::from_str(&event.data) {
+                            Ok(value) => value,
+                            Err(e) => {
+                                if event.data != "[DONE]" {
+                                    eprintln!("{} could not be parsed: {e}", event.data);
+                                }
+                                continue;
+                            }
+                        };
+                        for word in parsed.choices.into_iter().flat_map(|c| c.delta.content) {
+                            answer.push_str(&word);
+                            output_tx.send(Output::Data(word)).await?;
                         }
-                        continue;
                     }
-                };
-                for word in parsed.choices.into_iter().flat_map(|c| c.delta.content) {
-                    output_tx.send(Output::Data(word)).await?;
+                    // Let the outside world know, that chatgpt is done now
+                    output_tx.send(Output::End).await?;
+                    // Remember the answer as whole and append it to the conversation
+                    self.messages.push(Msg {
+                        role: "assistant".to_string(),
+                        content: answer,
+                    });
+                }
+                Input::Context(new_context) => {
+                    match new_context {
+                        UseContext::Basic => {
+                            println!("--- System: Using 'basic' context");
+                            context = Msg {
+                                role: "system".to_string(),
+                                content: BASIC_CONTEXT.to_string(),
+                            }
+                        }
+                        UseContext::Short => {
+                            println!("--- System: Using 'short' context");
+                            context = Msg {
+                                role: "system".to_string(),
+                                content: NO_REPEAT.to_string(),
+                            }
+                        }
+                        UseContext::Programming => {
+                            println!("--- System: Using 'programming' context");
+                            context = Msg {
+                                role: "system".to_string(),
+                                content: PROGRAMMING.to_string(),
+                            }
+                        }
+                    }
+                    self.messages.push(context.clone());
+                }
+                Input::Clear => {
+                    println!("--- System: Clearing conversation");
+                    self.messages.clear();
+                    // Use last context
+                    self.messages.push(context.clone());
                 }
             }
-            // Let the outside world know, that chatgpt is done now
-            output_tx.send(Output::End).await?;
         }
         Ok(())
     }

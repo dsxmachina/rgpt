@@ -12,23 +12,93 @@ mod client;
 // success
 
 use crate::client::GptClient;
-use client::Output;
+use client::{Input, Output, UseContext};
 use markdown::mdast::Node;
 use pulldown_cmark_mdcat::resources::NoopResourceHandler;
 use pulldown_cmark_mdcat::{Environment, Settings, TerminalSize};
 use std::env;
 use std::io::stdout;
 use std::path::Path;
-use std::{
-    error::Error,
-    io::{stdin, Write},
-};
+use std::{error::Error, io::stdin};
+use tokio::sync::mpsc::Sender;
 use tokio::{spawn, sync::mpsc};
 
 use markdown::{to_mdast, ParseOptions};
-use pulldown_cmark::{Event as MdEvent, Options, Parser};
+use pulldown_cmark::{Options, Parser};
 use pulldown_cmark_mdcat::{push_tty, terminal::TerminalProgram};
 use syntect::parsing::SyntaxSet;
+
+struct MdPrinter {
+    tp: TerminalProgram,
+    ss: SyntaxSet,
+    environment: Environment,
+    rs_handler: NoopResourceHandler,
+}
+
+impl MdPrinter {
+    pub fn new() -> Result<MdPrinter, Box<dyn Error>> {
+        // Initialize parser (lots of boilerplate)
+        let tp = TerminalProgram::detect();
+        let ss = SyntaxSet::load_defaults_newlines();
+        let current_path = Path::new(".").canonicalize()?;
+        let environment = Environment::for_local_directory(&current_path)?;
+        let rs_handler = NoopResourceHandler;
+        Ok(MdPrinter {
+            tp,
+            ss,
+            environment,
+            rs_handler,
+        })
+    }
+
+    pub fn print(&self, input: impl AsRef<str>) -> Result<(), Box<dyn Error>> {
+        let mut terminal_size = TerminalSize::detect().unwrap();
+        terminal_size.columns = terminal_size.columns / 2;
+        let settings = Settings {
+            terminal_capabilities: self.tp.capabilities(),
+            terminal_size,
+            syntax_set: &self.ss,
+            theme: pulldown_cmark_mdcat::Theme::default(),
+        };
+        let parser = Parser::new_ext(input.as_ref(), Options::all());
+        push_tty(
+            &settings,
+            &self.environment,
+            &self.rs_handler,
+            &mut stdout(),
+            parser,
+        )?;
+        Ok(())
+    }
+}
+
+async fn get_user_input() -> Result<String, Box<dyn Error>> {
+    let mut input = String::with_capacity(1_000);
+    let std_input = stdin();
+    std_input.read_line(&mut input)?;
+    Ok(input)
+}
+
+async fn process_input(input: &str, input_tx: &Sender<Input>) -> Result<bool, Box<dyn Error>> {
+    // add some commands here
+    if input.starts_with('/') {
+        match input.trim().to_lowercase().as_str() {
+            "/exit" | "/quit" | "/stop" => std::process::exit(0),
+            "/programming" | "/prog" | "/p" => {
+                input_tx
+                    .send(Input::Context(UseContext::Programming))
+                    .await?
+            }
+            "/short" | "/s" => input_tx.send(Input::Context(UseContext::Short)).await?,
+            "/basic" | "/b" => input_tx.send(Input::Context(UseContext::Basic)).await?,
+            "/clear" | "/c" | "/new" | "/n" => input_tx.send(Input::Clear).await?,
+            _other => (),
+        }
+        return Ok(true);
+    }
+    input_tx.send(Input::Text(input.to_string())).await?;
+    Ok(false)
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -38,12 +108,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
         std::process::exit(1);
     }
 
-    // Initialize terminal
+    // Create a new client and spawn an event stream
+    let client = GptClient::new();
+    let (input_tx, input_rx) = mpsc::channel(16);
+    let (output_tx, mut output_rx) = mpsc::channel(16);
+    let _handle = spawn(client.event_stream(input_rx, output_tx));
+
+    // Create markdown printer
+    let md = MdPrinter::new()?;
+
+    // Parse input (if any)
     let args: Vec<String> = env::args().collect();
-
-    // Ok, focus on the gpt-part for a short time
     let mut input = String::new();
-
     if args.len() > 1 {
         for word in args.iter().skip(1) {
             input.push_str(word);
@@ -51,40 +127,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         input.pop();
     } else {
-        let std_input = stdin();
-        std_input.read_line(&mut input)?;
-        println!("");
+        md.print("# Input")?;
+        input = get_user_input().await?;
     };
-
-    let (input_tx, input_rx) = mpsc::channel(16);
-    let (output_tx, mut output_rx) = mpsc::channel(16);
-
-    // Create a new client and spawn an event stream
-    let client = GptClient::new();
-    let handle = spawn(client.event_stream(input_rx, output_tx));
-    input_tx.send(input).await?;
-
-    // In the meantime, initialize the terminal output
-    let tp = TerminalProgram::detect();
-    let ss = SyntaxSet::load_defaults_newlines();
-    let mut terminal_size = TerminalSize::detect().unwrap();
-    terminal_size.columns = terminal_size.columns / 2;
-    let settings = Settings {
-        terminal_capabilities: tp.capabilities(),
-        terminal_size,
-        syntax_set: &ss,
-        theme: pulldown_cmark_mdcat::Theme::default(),
-    };
-    // Why the fuck do we need this ?
-    let current_path = Path::new(".").canonicalize()?;
-    let environment = Environment::for_local_directory(&current_path)?;
-    let rs_handler = NoopResourceHandler;
+    while process_input(&input, &input_tx).await? {
+        input = get_user_input().await?;
+    }
 
     // NOTE: We could use MAX_TOKENS to initialize the answer string correctly,
     // however 10k should be enough for most questions.
     let mut full_answer = String::with_capacity(10_000);
 
     loop {
+        // Prepare the answer box
+        println!("");
+        md.print("# ChatGPT")?;
+
         // Initialize last-children-len with 1, because we only print after having at least two nodes.
         let mut last_children_len = 1;
         let mut chunk_answer = String::with_capacity(1_000);
@@ -98,14 +156,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             if root.children.len() > last_children_len {
                                 // We are super sneaky, and just print each chunk,
                                 // whenever there is a new node in the root tree of our document.
-                                let parser = Parser::new_ext(&chunk_answer, Options::all());
-                                push_tty(
-                                    &settings,
-                                    &environment,
-                                    &rs_handler,
-                                    &mut stdout(),
-                                    parser,
-                                )?;
+                                md.print(&chunk_answer)?;
                                 chunk_answer.clear(); // reset chunk
                                 last_children_len = root.children.len();
                             }
@@ -118,35 +169,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     chunk_answer.push_str(&answer);
                 }
                 Output::End => {
-                    let parser = Parser::new_ext(&chunk_answer, Options::all());
-                    push_tty(&settings, &environment, &rs_handler, &mut stdout(), parser)?;
-                    chunk_answer.clear(); // reset chunk
-                                          // println!("{full_answer}");
+                    md.print(&chunk_answer)?;
+                    chunk_answer.clear();
                     full_answer.clear();
                     break;
                 }
             }
         }
-        println!("\n--- Input: ");
+        println!("");
+        md.print("# Input")?;
         // Let's take another input
-        let mut input = String::new();
-        stdin().read_line(&mut input)?;
-
-        // add some commands here
-        if input.starts_with('/') {
-            match input.to_lowercase().as_str() {
-                "/exit" => break,
-                _other => (),
-            }
+        input = get_user_input().await?;
+        while process_input(&input, &input_tx).await? {
+            input = get_user_input().await?;
         }
-
-        println!("--- ChatGPT: ");
-        input_tx.send(input).await?;
     }
     // Drop the handles here, so that the handle can return properly
-    drop(input_tx);
-    drop(output_rx);
+    // drop(input_tx);
+    // drop(output_rx);
 
-    handle.await??;
-    Ok(())
+    // handle.await??;
+    // Ok(())
 }
