@@ -53,7 +53,7 @@ impl MdPrinter {
 
     pub fn print(&self, input: impl AsRef<str>) -> Result<(), Box<dyn Error>> {
         let mut terminal_size = TerminalSize::detect().unwrap();
-        terminal_size.columns = terminal_size.columns / 2;
+        terminal_size.columns = (terminal_size.columns / 2).max(38);
         let settings = Settings {
             terminal_capabilities: self.tp.capabilities(),
             terminal_size,
