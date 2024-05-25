@@ -89,12 +89,12 @@ async fn process_input(input: &str, input_tx: &Sender<Input>) -> Result<bool, Bo
         println!("- Showing this help screen - '/help' or '/h'");
         println!("- Clearing conversation    - '/clear' or '/c' or '/new' or '/n'");
         println!("- Quit program             - '/quit' or '/q' or '/exit' or '/stop'");
-        println!("");
+        println!();
         println!("-- Change context:");
         println!("- Basic (standard chatgpt-context)         - '/basic' or '/b'");
         println!("- Short (shorter, more direct answers)     - '/short' or '/s'");
         println!("- Programming (fine tuned for programmers) - '/programming' or '/prog' or '/p'");
-        println!("");
+        println!();
         println!("You can set the default context via environment variable RGPT_CONTEXT='basic'");
     };
     // add some commands here
@@ -158,7 +158,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     loop {
         // Prepare the answer box
-        println!("");
+        println!();
         md.print("# ChatGPT")?;
 
         // Initialize last-children-len with 1, because we only print after having at least two nodes.
@@ -194,7 +194,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
         }
-        println!("");
+        println!();
         md.print("# Input")?;
         // Let's take another input
         input = get_user_input().await?;

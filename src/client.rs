@@ -112,7 +112,7 @@ pub struct GptClient {
 #[test]
 fn test_chunk() {
     let msg = r#"{"id":"chatcmpl-8UdjQUhf7LF0Pw7YFvm2If9QVLiHo","object":"chat.completion.chunk","created":1702313260,"model":"gpt-3.5-turbo-0613","system_fingerprint":null,"choices":[{"index":0,"delta":{"content":"As"},"finish_reason":null}]}"#;
-    let parsed: std::result::Result<Chunk, _> = serde_json::from_str(&msg);
+    let parsed: std::result::Result<Chunk, _> = serde_json::from_str(msg);
     assert!(parsed.is_ok(), "Error: {}", parsed.unwrap_err());
 }
 
