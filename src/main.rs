@@ -84,10 +84,24 @@ async fn get_user_input() -> Result<String, Box<dyn Error>> {
 }
 
 async fn process_input(input: &str, input_tx: &Sender<Input>) -> Result<bool, Box<dyn Error>> {
+    let print_help = || {
+        println!("-- Basic commands:");
+        println!("- Showing this help screen - '/help' or '/h'");
+        println!("- Clearing conversation    - '/clear' or '/c' or '/new' or '/n'");
+        println!("- Quit program             - '/quit' or '/q' or '/exit' or '/stop'");
+        println!("");
+        println!("-- Change context:");
+        println!("- Basic (standard chatgpt-context)         - '/basic' or '/b'");
+        println!("- Short (shorter, more direct answers)     - '/short' or '/s'");
+        println!("- Programming (fine tuned for programmers) - '/programming' or '/prog' or '/p'");
+        println!("");
+        println!("You can set the default context via environment variable RGPT_CONTEXT='basic'");
+    };
     // add some commands here
     if input.starts_with('/') {
         match input.trim().to_lowercase().as_str() {
-            "/exit" | "/quit" | "/stop" => std::process::exit(0),
+            "/exit" | "/quit" | "/q" | "/stop" => std::process::exit(0),
+            "/help" | "/h" => print_help(),
             "/programming" | "/prog" | "/p" => {
                 input_tx
                     .send(Input::Context(UseContext::Programming))
@@ -96,7 +110,7 @@ async fn process_input(input: &str, input_tx: &Sender<Input>) -> Result<bool, Bo
             "/short" | "/s" => input_tx.send(Input::Context(UseContext::Short)).await?,
             "/basic" | "/b" => input_tx.send(Input::Context(UseContext::Basic)).await?,
             "/clear" | "/c" | "/new" | "/n" => input_tx.send(Input::Clear).await?,
-            _other => (),
+            _other => println!("--- System: Invalid input."),
         }
         return Ok(true);
     }
