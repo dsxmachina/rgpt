@@ -1,4 +1,5 @@
 mod client;
+mod input;
 // Alright boy - step 1,
 //
 // build something you can type a prompt into
@@ -13,6 +14,7 @@ mod client;
 
 use crate::client::GptClient;
 use client::{Input, Output, UseContext};
+use input::get_user_input;
 use markdown::mdast::Node;
 use pulldown_cmark_mdcat::resources::NoopResourceHandler;
 use pulldown_cmark_mdcat::{Environment, Settings, TerminalSize};
@@ -76,12 +78,13 @@ impl MdPrinter {
     }
 }
 
-async fn get_user_input() -> Result<String, Box<dyn Error>> {
-    let mut input = String::with_capacity(1_000);
-    let std_input = stdin();
-    std_input.read_line(&mut input)?;
-    Ok(input)
-}
+// We can make this more elaborate:
+// async fn get_user_input() -> Result<String, Box<dyn Error>> {
+//     let mut input = String::with_capacity(1_000);
+//     let std_input = stdin();
+//     std_input.read_line(&mut input)?;
+//     Ok(input)
+// }
 
 async fn process_input(input: &str, input_tx: &Sender<Input>) -> Result<bool, Box<dyn Error>> {
     let print_help = || {
