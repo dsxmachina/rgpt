@@ -16,8 +16,12 @@
         inherit (pkgs) lib;
         # Will be reused in the dev-shell section
         commonArgs = {
-          nativeBuildInputs = with pkgs; [];
-          buildInputs = with pkgs; [] ++ lib.optionals pkgs.stdenv.isDarwin [
+          nativeBuildInputs = with pkgs; [
+            pkg-config
+          ];
+          buildInputs = with pkgs; [
+            openssl
+          ] ++ lib.optionals pkgs.stdenv.isDarwin [
             pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
             pkgs.libiconv
           ];
@@ -35,6 +39,8 @@
 
           # use the above build-intputs
           inherit (commonArgs) nativeBuildInputs buildInputs;
+          PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkg-config";
+
         };
       in rec {
         packages.default = rfm;
@@ -54,6 +60,9 @@
           # This can also be fixed by using oxalica/rust-overlay and specifying the rust-src extension
           # See https://discourse.nixos.org/t/rust-src-not-found-and-other-misadventures-of-developing-rust-on-nixos/11570/3?u=samuela. for more details.
           RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
+
+          # Required for openssl
+          PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkg-config";
         };
       }
     );
