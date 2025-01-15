@@ -106,12 +106,19 @@ async fn process_input(input: &str, input_tx: &Sender<Input>) -> Result<bool, Bo
             "/exit" | "/quit" | "/q" | "/stop" => std::process::exit(0),
             "/help" | "/h" => print_help(),
             "/programming" | "/prog" | "/p" => {
+                println!("--- System: Using 'programming' context");
                 input_tx
                     .send(Input::Context(UseContext::Programming))
                     .await?
             }
-            "/short" | "/s" => input_tx.send(Input::Context(UseContext::Short)).await?,
-            "/basic" | "/b" => input_tx.send(Input::Context(UseContext::Basic)).await?,
+            "/short" | "/s" => {
+                println!("--- System: Using 'short' context");
+                input_tx.send(Input::Context(UseContext::Short)).await?;
+            }
+            "/basic" | "/b" => {
+                println!("--- System: Using 'basic' context");
+                input_tx.send(Input::Context(UseContext::Basic)).await?;
+            }
             "/clear" | "/c" | "/new" | "/n" => input_tx.send(Input::Clear).await?,
             _other => println!("--- System: Invalid input."),
         }

@@ -222,28 +222,24 @@ impl GptClient {
                 Input::Context(new_context) => {
                     match new_context {
                         UseContext::Basic => {
-                            println!("--- System: Using 'basic' context");
                             context = Msg {
                                 role: "system".to_string(),
                                 content: BASIC_CONTEXT.to_string(),
                             }
                         }
                         UseContext::Short => {
-                            println!("--- System: Using 'short' context");
                             context = Msg {
                                 role: "system".to_string(),
                                 content: NO_REPEAT.to_string(),
                             }
                         }
                         UseContext::Programming => {
-                            println!("--- System: Using 'programming' context");
                             context = Msg {
                                 role: "system".to_string(),
                                 content: PROGRAMMING.to_string(),
                             }
                         }
                     }
-                    print!("\r");
                     self.messages.push(context.clone());
                 }
                 Input::Clear => {
