@@ -243,6 +243,7 @@ impl GptClient {
                             }
                         }
                     }
+                    print!("\r");
                     self.messages.push(context.clone());
                 }
                 Input::Clear => {
